@@ -1,0 +1,17 @@
+# Secrets
+config.json
+Data/
+
+# macOS system files
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+
+# Node.js
+node_modules/
+
+# VS Code settings
+.vscode/
