@@ -7,6 +7,13 @@ from collections import defaultdict
 from web3 import Web3
 from datetime import datetime
 
+# ------------------ Settings ------------------
+VERBOSE = False  # set True to see warnings/info
+
+def _log(msg):
+    if VERBOSE:
+        print(msg)
+
 # ------------------ Config ------------------
 with open('config.json') as f:
     cfg = json.load(f)
@@ -52,7 +59,7 @@ def _decode_b32(val: bytes):
     return None
 
 def get_symbol_and_name(contract_addr):
-    """Try string ABI, then bytes32 fallback. Return ('','') on failure."""
+    """Try string ABI, then bytes32 fallback. Return ('','') on failure (quiet)."""
     try:
         c = w3.eth.contract(address=checksum(contract_addr), abi=ERC721_META_ABI_STR)
         sym = c.functions.symbol().call()
@@ -65,16 +72,16 @@ def get_symbol_and_name(contract_addr):
             nm_b  = _decode_b32(c2.functions.name().call()) or ""
             return sym_b, nm_b
         except Exception as e2:
-            print(f"[warn] symbol/name failed for {contract_addr}: {e1} / {e2}")
+            _log(f"[warn] symbol/name failed for {contract_addr}: {e1} / {e2}")
             return "", ""
 
 def get_token_uri(contract_addr, token_id):
-    """Call tokenURI; return None on failure (with a warning)."""
+    """Call tokenURI; return None on failure (quiet)."""
     try:
         c = w3.eth.contract(address=checksum(contract_addr), abi=ERC721_META_ABI_STR)
         return c.functions.tokenURI(int(token_id)).call()
     except Exception as e:
-        print(f"[warn] tokenURI failed for {contract_addr} #{token_id}: {e}")
+        _log(f"[warn] tokenURI failed for {contract_addr} #{token_id}: {e}")
         return None
 
 # ------------------ Etherscan helpers -----------------
@@ -95,8 +102,9 @@ def etherscan_v2_tokennfttx(address, page=1, offset=1000):
     r.raise_for_status()
     data = r.json()
     if data.get("status") != "1":
+        # Silence common 'No transactions found'
         if (data.get("message") or "").lower() != "no transactions found":
-            print(f"[warn] tokennfttx status={data.get('status')} msg={data.get('message')}")
+            _log(f"[warn] tokennfttx status={data.get('status')} msg={data.get('message')}")
         return []
     res = data.get("result", [])
     return res if isinstance(res, list) else []
@@ -135,7 +143,7 @@ def build_erc721_holdings_and_event_symbols(events, wallet_lower):
         if frm == wallet_lower and token_id in holdings[contract]:
             holdings[contract].discard(token_id)
 
-        # Capture Etherscan-provided fallbacks
+        # Capture Etherscan-provided fallbacks (quiet)
         sym = (e.get('tokenSymbol') or "").strip()
         nm  = (e.get('tokenName')   or "").strip()
         if sym and 'symbol' not in event_symbols[contract]:
@@ -170,7 +178,7 @@ _SESSION.headers.update({"User-Agent": "nft-metadata-fetcher/1.0"})
 
 def fetch_metadata(uri):
     """
-    Return (metadata_json_dict, resolved_metadata_url) or (None, url) on failure
+    Return (metadata_json_dict, resolved_metadata_url) or (None, url) on failure (quiet).
     """
     if not uri:
         return None, None
@@ -182,7 +190,7 @@ def fetch_metadata(uri):
             meta = json.loads(base64.b64decode(b64))
             return meta, uri
         except Exception as e:
-            print(f"[warn] failed to decode base64 metadata: {e}")
+            _log(f"[warn] failed to decode base64 metadata: {e}")
             return None, uri
 
     url = ipfs_to_http(uri)
@@ -193,13 +201,13 @@ def fetch_metadata(uri):
             try:
                 return r.json(), url
             except Exception as je:
-                print(f"[warn] metadata not JSON at {url}: {je}")
+                _log(f"[warn] metadata not JSON at {url}: {je}")
                 return None, url
         except Exception as e:
             if attempt == 0:
                 time.sleep(0.3)
             else:
-                print(f"[warn] metadata fetch failed {url}: {e}")
+                _log(f"[warn] metadata fetch failed {url}: {e}")
                 return None, url
 
 def extract_image_url(meta):
@@ -234,10 +242,7 @@ for wallet in ADDRESSES:
             onchain_sym, onchain_nm = get_symbol_and_name(contract)
             sym_cache[contract]  = onchain_sym or fallback_sym
             name_cache[contract] = onchain_nm  or fallback_nm
-            if not onchain_sym and fallback_sym:
-                print(f"[info] using Etherscan symbol fallback for {contract}: {fallback_sym}")
-            if not onchain_nm and fallback_nm:
-                print(f"[info] using Etherscan name fallback for {contract}: {fallback_nm}")
+            # (quiet) previously we printed info about fallbacks here
 
         for token_id in sorted(token_ids, key=lambda x: int(x)):
             token_uri = get_token_uri(contract, token_id)
@@ -266,3 +271,4 @@ os.makedirs(out_dir, exist_ok=True)
 out_path = os.path.join(out_dir, f"erc721_holdings_{current_date}.csv")
 df.to_csv(out_path, index=False)
 print(f"Saved: {out_path}")
+
